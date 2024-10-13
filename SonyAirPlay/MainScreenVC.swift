@@ -13,17 +13,31 @@ struct CellModel: Hashable {
     let id = UUID() // Уникальный идентификатор
     let title: String
     let imageName: String
+    var size: CGSize
+
+    static func == (lhs: CellModel, rhs: CellModel) -> Bool {
+        return lhs.id == rhs.id && lhs.title == rhs.title && lhs.imageName == rhs.imageName && lhs.size == rhs.size // или другие уникальные свойства
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(imageName)
+        hasher.combine(size.width)
+        hasher.combine(size.height)
+    }
 }
 
 // Вью-модель, хранящая данные для коллекции
 class CollectionViewModel {
     // Начальные данные
     var items: [CellModel] = [
-        CellModel(title: "Item 1", imageName: "image1"),
-        CellModel(title: "Item 2", imageName: "image2"),
-        CellModel(title: "Item 3", imageName: "image3")
+        CellModel(title: "Item 1", imageName: "image1", size: .init(width: 100, height: 150)),
+        CellModel(title: "Item 2", imageName: "image2", size: .init(width: 100, height: 150)),
+        CellModel(title: "Item 3", imageName: "image3", size: .init(width: 100, height: 150))
     ]
 }
+
 class CollectionViewController: UIViewController {
 
     private var collectionView: UICollectionView!
@@ -45,9 +59,9 @@ class CollectionViewController: UIViewController {
     // Инициализация и настройка UICollectionView
     private func setupCollectionView() {
         let layout = UICollectionViewFlowLayout()
-        layout.itemSize = CGSize(width: 100, height: 150) // Размер ячеек
-        layout.minimumInteritemSpacing = 10
-        layout.minimumLineSpacing = 10
+//        layout.itemSize = CGSize(width: 100, height: 150) // Размер ячеек
+        layout.minimumInteritemSpacing = 1
+        layout.minimumLineSpacing = 1
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -64,6 +78,7 @@ class CollectionViewController: UIViewController {
             content.image = UIImage(named: item.imageName)
             content.imageProperties.maximumSize = CGSize(width: 80, height: 80)
             cell.contentConfiguration = content
+            cell.backgroundColor = .red
         }
 
         dataSource = UICollectionViewDiffableDataSource<Section, CellModel>(collectionView: collectionView) { collectionView, indexPath, item in
@@ -103,6 +118,12 @@ class CollectionViewController: UIViewController {
         alert.addAction(deleteAction)
         alert.addAction(duplicateAction)
         alert.addAction(moveAction)
+
+        // Кнопка "Изменить размер"
+        alert.addAction(UIAlertAction(title: "Изменить размер", style: .default, handler: { _ in
+            self.showResizeAlert(for: indexPath.row)
+        }))
+
         alert.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: nil))
 
         present(alert, animated: true, completion: nil)
@@ -121,7 +142,7 @@ class CollectionViewController: UIViewController {
             guard let positionText = moveAlert.textFields?.first?.text,
                   let newPosition = Int(positionText) else { return }
 
-            self?.moveItem(item, from: indexPath.row, to: newPosition)
+            self?.moveItem(from: indexPath.row, to: newPosition)
         }
 
         moveAlert.addAction(moveAction)
@@ -130,23 +151,16 @@ class CollectionViewController: UIViewController {
         present(moveAlert, animated: true, completion: nil)
     }
 
-    func moveItem(_ item: CellModel, from oldPosition: Int, to newPosition: Int) {
-//        var snapshot = dataSource.snapshot()
-//
-//        // Удаляем элемент из текущей позиции
-//        snapshot.deleteItems([item])
+    func moveItem(from oldPosition: Int, to newPosition: Int) {
+        var validPosition = min(max(newPosition, 1), viewModel.items.count) // Если позиции нет, переместим в конец
+        validPosition -= 1 // Приводим к индексу
 
-        // Рассчитываем новую позицию
-        var validPosition = min(newPosition, viewModel.items.count) // Если позиции нет, переместим в конец
-        validPosition = max(1, validPosition) - 1
-        // Вставляем элемент в новую позицию
-//        snapshot.insertItems([item], afterItem: snapshot.itemIdentifiers(inSection: .main)[validPosition - 1])
-        let lastElement = viewModel.items[oldPosition]
-        let newElement = viewModel.items[validPosition]
-        viewModel.items[oldPosition] = newElement
-        viewModel.items[validPosition] = lastElement
+        guard oldPosition != validPosition else { return } // Если позиция не меняется
 
-        // Применяем новый снапшот
+        let itemToMove = viewModel.items[oldPosition]
+        viewModel.items.remove(at: oldPosition) // Удаляем элемент из старой позиции
+        viewModel.items.insert(itemToMove, at: validPosition) // Вставляем в новую позицию
+
         updateSnapshot()
     }
 
@@ -160,9 +174,36 @@ class CollectionViewController: UIViewController {
 
     // Дублирование ячейки
     private func duplicateItem(_ item: CellModel) {
-        let dublicateItem: CellModel = .init(title: item.title, imageName: item.imageName)
+        let dublicateItem: CellModel = .init(title: item.title, imageName: item.imageName, size: item.size)
         viewModel.items.append(dublicateItem)
         updateSnapshot()
+    }
+
+    // Показ алерта для изменения размера ячейки
+    private func showResizeAlert(for index: Int) {
+        let resizeAlert = UIAlertController(title: "Изменить размер", message: "Введите новый размер", preferredStyle: .alert)
+
+        resizeAlert.addTextField { textField in
+            textField.keyboardType = .decimalPad
+            textField.placeholder = "Ширина"
+        }
+
+        resizeAlert.addTextField { textField in
+            textField.keyboardType = .decimalPad
+            textField.placeholder = "Высота"
+        }
+
+        resizeAlert.addAction(UIAlertAction(title: "OK", style: .default, handler: { _ in
+            if let widthText = resizeAlert.textFields?.first?.text, let heightText = resizeAlert.textFields?.last?.text,
+               let width = Double(widthText), let height = Double(heightText) {
+                self.viewModel.items[index].size = CGSize(width: width, height: height)
+                self.updateSnapshot()
+            }
+        }))
+
+        resizeAlert.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: nil))
+
+        present(resizeAlert, animated: true, completion: nil)
     }
 }
 
@@ -170,5 +211,11 @@ class CollectionViewController: UIViewController {
 extension CollectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         handleCellTap(at: indexPath)
+    }
+}
+
+extension CollectionViewController: UICollectionViewDelegateFlowLayout {
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return viewModel.items[indexPath.item].size
     }
 }
